@@ -1,0 +1,11 @@
+# Prototype security boundaries
+
+Per-participant random bearer tokens authorize HTTP actions and the first WebSocket auth message. Tokens never appear in invitation or socket URLs. Snapshots exclude the token map. The backend validates event types and bounded coordinates, timestamps, modes, delays and scoring weights. Host actions are checked server-side. WebSocket origins are explicitly allowed; rooms are isolated and changes serialized.
+
+Rooms have a 24-hour TTL, eight-person limit, 200-room process limit, 24-socket room limit, HTTP request limits and WebSocket event limits. Provider traffic is bounded, cached and serialized. Configure upstream request-body limits and run uvicorn with `--ws-max-size 16384`; the application content-length check alone is not sufficient protection against arbitrary streaming bodies.
+
+Use HTTPS/WSS for a hosted demonstration. Invitation codes grant joining and disclosure of participant locations. Share links only with intended participants; don't use sensitive addresses for public presentations. Browser session storage is accessible to same-origin script, so no credentials or untrusted HTML should be injected. Venue labels render as React text; API error bodies do not echo provider keys. Backend logs must not include provider request URLs with geocoding credentials.
+
+This is an anonymous hackathon prototype, not a private account service. Production needs token revocation/rotation, participant removal and host succession, abuse controls at the gateway, durable data with retention/deletion, monitoring and a shared broadcast system before multiple workers. Do not claim persistence or availability across restart/redeploy.
+
+Run `npm audit` and `backend/.venv/bin/python -m pip_audit` when refreshing packages. Auditors require network and must not be added to the network-independent test suite. Check the implementation plan for the audit results actually executed in this workspace. The lint preset was replaced with direct TypeScript/React Hooks rules because its unpatched glob dependency had a known denial-of-service advisory. No audit suppression is used.

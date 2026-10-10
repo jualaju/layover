@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: rendezvous-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: ORS_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: PROVIDER_USER_AGENT
+        sync: false
