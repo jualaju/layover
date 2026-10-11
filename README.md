@@ -4,6 +4,8 @@ A real-time meeting-point optimizer for small groups. Each person chooses a star
 
 The application contains no fake routing fallback. Without an ORS key, rooms, map clicks, device location and live delay updates work; routing and place search report that configuration is missing. Synthetic data is confined to automated tests.
 
+The interface uses an 8-bit overworld theme with original SVG island artwork, pixel character/café/star map markers, and a locally hosted Pixelify Sans font. The font's SIL Open Font License is included in `frontend/public/fonts/OFL.txt`; no runtime font service is required. The landing illustration is decorative; room maps continue to use real OpenStreetMap geography.
+
 ## Run locally
 
 Requirements: **Node 22.14+ (22.x)**, npm, Python 3.12 with venv. The original Node 18/Next 14 starter was upgraded because dependency auditing found known security issues. No system runtime was overwritten.
@@ -30,6 +32,10 @@ npm run dev -- --hostname 0.0.0.0
 ```
 
 Open http://localhost:3000. Backend health: http://localhost:8000/health. Interactive API reference: http://localhost:8000/docs. Press Ctrl+C to stop either server.
+
+### Optional Supabase login
+
+The room flow stays anonymous, but the UI supports Supabase email/password accounts for a stable signed-in identity. In `frontend/.env.local`, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from the Supabase Dashboard's **Connect** dialog, then restart or rebuild the frontend. These are browser-safe public values; never expose `service_role` or other secret keys. Enable Email/Password in Supabase Auth and add each local/production origin to **Auth → URL Configuration** so confirmation links can return to the app. Without both variables, the login dialog explains the missing configuration and rooms remain usable.
 
 For the current workspace only, a temporary Node 22 binary was downloaded under `/tmp/rendezvous-tools/node_modules/node/bin`. If your shell still uses Node 18, prefix frontend commands with `PATH=/tmp/rendezvous-tools/node_modules/node/bin:$PATH`. This temporary path is not a deployment dependency; use a normal Node 22 installation elsewhere.
 

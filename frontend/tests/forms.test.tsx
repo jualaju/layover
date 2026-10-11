@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { ParticipantForm } from "@/components/participant-form";
 import { SettingsForm } from "@/components/settings-form";
 import { api, loadSession, saveSession } from "@/lib/api";
+import { AuthControl } from "@/components/auth-control";
 
 vi.mock("next/dynamic", () => ({ default: () => () => <div>Map placeholder in component test</div> }));
 
@@ -45,4 +46,10 @@ it("persists per-room identity and sends bearer authorization", async () => {
   await api("/rooms/A", "test-token");
   expect(fetcher.mock.calls[0][1].headers.Authorization).toBe("Bearer test-token");
   vi.unstubAllGlobals();
+});
+
+it("keeps the app usable and explains how to configure an absent Supabase login", async () => {
+  render(<AuthControl />);
+  await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Supabase login is not configured");
 });
