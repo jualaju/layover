@@ -2,7 +2,9 @@
 
 A real-time meeting-point optimizer for small groups. Each person chooses a starting point and walking, cycling, or driving. The server discovers up to ten real OSM cafés/restaurants, requests real OpenRouteService durations, and recommends the venue with the shortest longest journey. Shared rooms synchronize through authenticated WebSockets.
 
-The application contains no fake routing fallback. Without an ORS key, rooms, map clicks, device location and live delay updates work; routing and place search report that configuration is missing. Synthetic data is confined to automated tests.
+The application contains no fake routing fallback. Without an ORS key, rooms, map clicks, device location and live delay updates work; routing reports that configuration is missing; submitted place searches use Nominatim without an ORS key. Synthetic data is confined to automated tests.
+
+After choosing a venue, **Open my directions** opens Google Maps with your starting point and travel mode. **Add to calendar** downloads a timezone-aware arrival reminder for an eligible selection. Calendar files are snapshots, not live subscriptions; export again after changing the plan. Directions are calculated by Google Maps independently of the ORS estimates.
 
 The interface uses an 8-bit overworld theme with original SVG island artwork, pixel character/café/star map markers, and a locally hosted Pixelify Sans font. The font's SIL Open Font License is included in `frontend/public/fonts/OFL.txt`; no runtime font service is required. The landing illustration is decorative; room maps continue to use real OpenStreetMap geography.
 
@@ -33,9 +35,13 @@ npm run dev -- --hostname 0.0.0.0
 
 Open http://localhost:3000. Backend health: http://localhost:8000/health. Interactive API reference: http://localhost:8000/docs. Press Ctrl+C to stop either server.
 
-### Optional Supabase login
+### Optional account login
 
-The room flow stays anonymous, but the UI supports Supabase email/password accounts for a stable signed-in identity. In `frontend/.env.local`, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from the Supabase Dashboard's **Connect** dialog, then restart or rebuild the frontend. These are browser-safe public values; never expose `service_role` or other secret keys. Enable Email/Password in Supabase Auth and add each local/production origin to **Auth → URL Configuration** so confirmation links can return to the app. Without both variables, the login dialog explains the missing configuration and rooms remain usable.
+The header supports email/password accounts stored in SQLite by the backend. Passwords are stored as salted PBKDF2 hashes, and login sessions use an HttpOnly cookie. The default database is `backend/data/rendezvous.sqlite3`; Docker Compose stores it in the `auth_data` volume. Room links and room access remain independent of account login.
+
+Supabase accounts are not migrated because their passwords are not available to the app. Existing users should create a new local account. For a hosted deployment, mount persistent storage at the configured `AUTH_DB_PATH` or accounts will be lost when the service is replaced. If frontend and API are on different sites, configure `AUTH_COOKIE_SECURE=true` and `AUTH_COOKIE_SAMESITE=none` over HTTPS.
+
+For other devices on a local network, add the frontend's LAN origin (for example `http://192.168.1.113:3000`) to `ALLOWED_ORIGINS` in `backend/.env` and restart the backend.
 
 For the current workspace only, a temporary Node 22 binary was downloaded under `/tmp/rendezvous-tools/node_modules/node/bin`. If your shell still uses Node 18, prefix frontend commands with `PATH=/tmp/rendezvous-tools/node_modules/node/bin:$PATH`. This temporary path is not a deployment dependency; use a normal Node 22 installation elsewhere.
 
@@ -43,9 +49,9 @@ For the current workspace only, a temporary Node 22 binary was downloaded under 
 
 Register at [HeiGIT / OpenRouteService](https://account.heigit.org/), activate an API key, review the account's [plan](https://account.heigit.org/info/plans) and [terms](https://account.heigit.org/info/tos), and set **only** `backend/.env: ORS_API_KEY`. Plan pages are dynamic and account quotas must be confirmed in your dashboard; no daily quota is assumed here. ORS [matrix restrictions](https://openrouteservice.org/restrictions/) list 3,500 origin × destination pairs for ordinary matrices. Our maximum is 8 × 10, split into one request per used transport mode.
 
-ORS/Pelias powers submitted place search. Overpass supplies named venues within 4 km of the group center (up to 100 returned records, nearest ten retained); it is a finite search, not a global optimum guarantee. Requests use timeouts, a descriptive User-Agent, caching (routes 5 minutes, venues 30 minutes, searches 1 hour), and serialized calls at least two seconds apart. Public Overpass is best-effort and can return 429/timeout errors. The provider endpoints and tile URL are configurable.
+Nominatim powers explicitly submitted place search (no autocomplete). Configure `NOMINATIM_URL` to switch to another compatible service. Overpass supplies named venues within 4 km of the group center (up to 100 returned records, nearest ten retained); it is a finite search, not a global optimum guarantee. Requests use timeouts, a descriptive User-Agent, caching (routes 5 minutes, venues 30 minutes, searches 1 hour), and serialized calls at least two seconds apart. Public Overpass is best-effort and can return 429/timeout errors. The provider endpoints and tile URL are configurable.
 
-The map uses [OSM standard tiles](https://operations.osmfoundation.org/policies/tiles/), with visible attribution, browser caching and referrer, and no bulk download/prefetch. OSM data is [ODbL](https://www.openstreetmap.org/copyright). Public Nominatim is deliberately not integrated; its policy forbids autocomplete and requires whole-app throttling and an informed operator decision. A hosted demo must have an identifying contact in `PROVIDER_USER_AGENT` and remain within each provider's terms.
+The map uses [OSM standard tiles](https://operations.osmfoundation.org/policies/tiles/), with visible attribution, browser caching and referrer, and no bulk download/prefetch. OSM data is [ODbL](https://www.openstreetmap.org/copyright). The existing Nominatim integration uses a shared backend throttle and one-hour cache. Its [usage policy](https://operations.osmfoundation.org/policies/nominatim/) limits the entire application to at most one request per second, requires attribution and identification, forbids autocomplete, and requires the operator to take responsibility for public-service use. Keep a single backend process; use an appropriate hosted or self-hosted service for larger deployments. A hosted demo must have an identifying contact in `PROVIDER_USER_AGENT` and remain within each provider's terms.
 
 ## Architecture you can follow
 
@@ -106,6 +112,14 @@ Use HTTPS/WSS, test browser WebSocket upgrades, and run the complete real-provid
 
 ## Prototype limits
 
-Rooms expire 24 hours after creation, cap at eight people, and live only in one process. Restart/redeploy loses state. No database, Redis, accounts, transit, live traffic, history, full opening-hours parser, meeting-duration constraint or background traffic refresh. Route/schedule validity is refreshed by actions, not a continuous clock feed. Public providers and OSM metadata have incomplete coverage. A selected venue is not a reservation.
+Rooms expire 24 hours after creation, cap at eight people, and live only in one process. Restart/redeploy loses state. Room state has no database or Redis persistence; optional accounts use SQLite. No transit, live traffic, history, full opening-hours parser, meeting-duration constraint or background traffic refresh. Route/schedule validity is refreshed by actions, not a continuous clock feed. Public providers and OSM metadata have incomplete coverage. A selected venue is not a reservation.
 
-Anyone with a room code can join and see shared locations. Tokens are held in browser session storage and survive refresh in that tab; clearing storage loses the identity. Closed tabs do not remove participants, so unanimous switching may need the original participants to reconnect. An invitation link is not a private account system. Request/event limits and room TTL bound a hackathon prototype, but public deployment needs gateway request-body limits, abuse protection, durable persistence, token lifecycle and monitoring. Add PostgreSQL and shared broadcast before multiple workers.
+Anyone with a room code can join and see shared locations. Tokens are held in browser session storage and survive refresh in that tab; clearing storage loses the identity. Use **Leave meetup** to revoke your room token and remove your location and votes. Hosting passes to the next participant; empty rooms are deleted. Closing a tab alone does not leave the room. An invitation link is not a private account system. Request/event limits and room TTL bound a hackathon prototype, but public deployment needs gateway request-body limits, abuse protection, durable persistence, token lifecycle and monitoring. Add PostgreSQL and shared broadcast before multiple workers.
+
+
+Browser tests can use separate ports when local servers are already running:
+
+```bash
+cd frontend
+TEST_API_PORT=8001 TEST_WEB_PORT=3001 npm run test:e2e
+```

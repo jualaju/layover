@@ -6,7 +6,7 @@
 - Start frontend/backend with the documented key and origins. Use HTTPS for actual device location.
 - Choose a dense neighborhood you know (default map: central Bengaluru). Verify Overpass returns venues and ORS supports paths there. Do not depend on untested remote addresses.
 - Keep strict metadata verification off: most venues have unknown price/capacity/hours. Confirm opening details yourself if planning a real outing.
-- Use three different browsers/phones or isolated profiles. Closing participants' tabs does not remove their votes requirement.
+- Use three different browsers/phones or isolated profiles. Use “Leave meetup” before departing; closing a tab alone does not remove its voting requirement.
 
 ## Live demonstration
 

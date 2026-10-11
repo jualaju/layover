@@ -59,6 +59,20 @@ class CreateRoom(Input):
     settings: Settings
 
 
+class AuthCredentials(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+    @field_validator("email")
+    @classmethod
+    def valid_email(cls, value):
+        value = value.strip().lower()
+        if "@" not in value or value.startswith("@") or value.endswith("@") or "." not in value.rsplit("@", 1)[-1] or any(c.isspace() for c in value):
+            raise ValueError("Enter a valid email address")
+        return value
+
+
 class Venue(Input):
     id: str = Field(min_length=1, max_length=80)
     name: str = Field(min_length=1, max_length=160)

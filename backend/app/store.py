@@ -29,6 +29,7 @@ class Room:
     route_source: str | None = None
     version: int = 0
     sockets: set[WebSocket] = field(default_factory=set)
+    socket_participants: dict[WebSocket, str] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def snapshot(self):
@@ -57,6 +58,7 @@ class Room:
                 await asyncio.wait_for(socket.send_json(payload), timeout=2)
             except Exception:
                 self.sockets.discard(socket)
+                self.socket_participants.pop(socket, None)
         await asyncio.gather(*(send(s) for s in tuple(self.sockets)))
 
 

@@ -48,8 +48,18 @@ it("persists per-room identity and sends bearer authorization", async () => {
   vi.unstubAllGlobals();
 });
 
-it("keeps the app usable and explains how to configure an absent Supabase login", async () => {
+it("offers a local account sign-in and sign-up form", async () => {
   render(<AuthControl />);
   await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Supabase login is not configured");
+  expect(screen.getByLabelText("Email")).toBeInTheDocument();
+  expect(screen.getByLabelText("Password")).not.toHaveAttribute("minLength");
+  await userEvent.click(screen.getByRole("button", { name: /Create an account/ }));
+  expect(screen.getByLabelText("Password")).toHaveAttribute("minLength", "8");
+  expect(screen.getByText(/Use at least 8 characters/)).toBeInTheDocument();
+});
+
+it("reports room validation failures without misleading login advice", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({ detail: [{ loc: ["body", "ready_at"], msg: "Include a timezone", type: "value_error" }] }) }));
+  await expect(api("/rooms/A/participant", "token", "PUT", {})).rejects.toThrow("ready_at: Include a timezone");
+  vi.unstubAllGlobals();
 });

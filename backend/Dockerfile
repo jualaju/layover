@@ -3,7 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir pip==26.2.1 && pip install --no-cache-dir -r requirements.txt
 COPY app ./app
-RUN useradd -m rendezvous
+RUN useradd -m rendezvous && mkdir -p /data && chown rendezvous:rendezvous /data
 USER rendezvous
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--ws-max-size", "16384"]

@@ -43,6 +43,15 @@ test("two browser sessions coordinate a meetup and confirm a delay-driven switch
   await guest.reload();
   await expect(guest.locator(".recommendation h2")).toHaveText("Test B");
   expect(await guest.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(host.getByRole("link", { name: /Open my directions/ })).toHaveAttribute("href", /travelmode=walking/);
+  const download = host.waitForEvent("download");
+  await host.getByRole("button", { name: /Add to calendar/ }).click();
+  expect((await download).suggestedFilename()).toMatch(/rendezvous-.*\.ics/);
+  await host.getByRole("button", { name: "Leave meetup" }).click();
+  await host.getByRole("button", { name: "Confirm leave" }).click();
+  await expect(host).toHaveURL(/\/$/);
+  await expect(guest.getByRole("heading", { name: "Make the plan" })).toBeVisible();
+  await expect(guest.getByText("Alex", { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
   await hostContext.close(); await guestContext.close();
 });

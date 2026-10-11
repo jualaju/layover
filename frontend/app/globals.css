@@ -167,7 +167,7 @@ details { min-width: 130px; max-width: 270px; }summary { cursor: pointer; font-s
   .how-it-works { grid-template-columns: 1fr; gap: 20px; }.how-it-works > div { padding: 23px; }.how-it-works p { max-width: 100%; }
   .room-heading { padding: 25px 4%; }.room-heading h1 { font-size: 35px; }.room-nav { gap: 12px; }.room-nav .button { font-size: 17px; padding: 8px; }.room-map { height: 350px; }
   .room-layout { display: flex; flex-direction: column; padding: 0 4% 30px; }.room-sidebar, .room-main { display: contents; }.room-layout .panel, .room-map { width: 100%; }
-  .room-map { order: 0; }.room-sidebar > .panel:first-child { order: 1; }.room-sidebar > .panel:last-child:nth-child(3) { order: 2; }.recommendation { order: 3; }.room-main > .panel:not(.recommendation):not(.venue-panel) { order: 4; }.delay-panel { order: 5; }.venue-panel { order: 6; }
+  .room-map { order: 0; }.room-sidebar > .panel:first-child { order: 1; }.room-sidebar > .plan-panel { order: 2; }.room-sidebar > .leave-panel { order: 7; }.recommendation { order: 3; }.room-main > .panel:not(.recommendation):not(.venue-panel) { order: 4; }.delay-panel { order: 5; }.venue-panel { order: 6; }
 }
 @media (max-width: 500px) {
   .brand { font-size: 27px; gap: 6px; }.brand-symbol { width: 24px; height: 24px; }.brand-symbol .pixel-icon { width: 22px; height: 22px; }.site-nav { gap: 12px; }.site-nav > .text-button { font-size: 11px; }

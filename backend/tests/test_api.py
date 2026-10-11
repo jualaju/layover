@@ -23,9 +23,9 @@ class FakeProviders:
         return []
 
 @pytest.fixture
-def harness():
+def harness(tmp_path):
     provider = FakeProviders()
-    app = create_app(Config(ors_key='test'), provider)
+    app = create_app(Config(ors_key='test', auth_db_path=str(tmp_path / 'auth.sqlite3')), provider)
     with TestClient(app) as client:
         yield client, app, provider
 
@@ -161,3 +161,63 @@ def test_vote_rejection_and_new_participant_invalidates_proposal(harness):
         assert state['proposal'] is None
     client.post(f'/rooms/{code}/join', json=participant('New', False))
     assert app.state.store.rooms[code].proposal is None
+
+
+def test_leave_revokes_identity_transfers_host_and_reuses_routes(harness):
+    client, app, provider = harness
+    a = create(client); code = a['room']['code']
+    b = client.post(f'/rooms/{code}/join', json=participant('Sam')).json()
+    client.post(f'/rooms/{code}/calculate?discover=true', headers=headers(a))
+    calls = provider.calls
+    with websocket(client, code) as ws:
+        ws.send_json({'type': 'auth', 'token': a['token']}); ws.receive_json()
+        assert client.post(f'/rooms/{code}/leave', headers=headers(a)).status_code == 200
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_json()
+    assert client.get(f'/rooms/{code}', headers=headers(a)).status_code == 401
+    state = client.get(f'/rooms/{code}', headers=headers(b)).json()
+    assert state['host_id'] == b['participant_id']
+    assert len(state['participants']) == 1
+    assert state['routing_status'] == 'ready'
+    assert provider.calls == calls
+    assert client.post(f'/rooms/{code}/leave', headers=headers(b)).status_code == 200
+    assert code not in app.state.store.rooms
+
+
+def test_rediscovery_retains_agreed_venue_and_bounds_candidates(harness):
+    client, app, provider = harness
+    a = create(client); code = a['room']['code']
+    client.post(f'/rooms/{code}/calculate?discover=true', headers=headers(a))
+    async def changed_discovery(locations):
+        return [Venue(id=f'node/{i}', name=f'Cafe {i}', location=Location(lat=12, lng=77)) for i in range(3, 13)]
+    provider.discover = changed_discovery
+    state = client.post(f'/rooms/{code}/calculate?discover=true', headers=headers(a)).json()
+    assert state['selected_id'] == 'node/2'
+    assert any(v['id'] == 'node/2' for v in state['venues'])
+    assert len(state['venues']) == 10
+
+
+def test_actual_body_limit_and_auth_origin(harness):
+    client, _, _ = harness
+    assert client.post('/rooms', content=iter([b'x' * 9000, b'x' * 9000])).status_code == 413
+    assert client.post('/auth/logout', headers={'origin': 'https://evil.example'}).status_code == 403
+
+
+def test_account_lifecycle_validation_and_revocation(harness):
+    client, _, _ = harness
+    credentials = {'email': ' User@Example.com ', 'password': 'a secure password'}
+    response = client.post('/auth/signup', json=credentials)
+    assert response.status_code == 201
+    assert response.json()['user']['email'] == 'user@example.com'
+    assert 'HttpOnly' in response.headers['set-cookie']
+    assert client.get('/auth/me').status_code == 200
+    cookie = client.cookies.get('rendezvous_session')
+    assert client.post('/auth/logout').status_code == 200
+    assert client.get('/auth/me').status_code == 401
+    assert client.get('/auth/me', headers={'cookie': f'rendezvous_session={cookie}'}).status_code == 401
+    assert client.post('/auth/login', json={**credentials, 'password': 'wrong'}).status_code == 401
+    assert client.post('/auth/login', json=credentials).status_code == 200
+    assert client.post('/auth/signup', json=credentials).status_code == 409
+    invalid = client.post('/auth/signup', json={**credentials, 'password': 'x' * 257})
+    assert invalid.status_code == 422
+    assert 'x' * 257 not in invalid.text

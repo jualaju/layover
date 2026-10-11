@@ -80,15 +80,33 @@ class Providers:
         self.cache[key] = (time.monotonic() + ttl, value)
 
     async def search(self, query: str) -> list[dict]:
-        self.key_required()
         key = ("search", query.casefold())
         cached = self.cached(key)
         if cached is not None:
             return cached
-        data = await self.request("GET", f"{self.config.ors_url}/geocode/search", params={"api_key": self.config.ors_key, "text": query, "size": 5})
+        # Public Nominatim supports low-volume address lookup without an API key.
+        # Keep it behind the backend, identify the app, cache results, and share
+        # the provider lock/rate limit with other external requests.
+        async with self.lock:
+            await asyncio.sleep(max(0, 2 - (time.monotonic() - self.last_request)))
+            self.last_request = time.monotonic()
+            try:
+                response = await self.client.get(
+                    self.config.nominatim_url,
+                    params={"q": query, "format": "jsonv2", "limit": 5},
+                    headers={"User-Agent": self.config.user_agent},
+                )
+                response.raise_for_status()
+                data = response.json()
+            except httpx.HTTPStatusError as exc:
+                raise ProviderError(f"Location search returned HTTP {exc.response.status_code}. Please retry later.") from exc
+            except (httpx.RequestError, ValueError) as exc:
+                raise ProviderError("Location search is unavailable or returned malformed data. Please retry later.") from exc
         try:
-            results = [Location(lat=f["geometry"]["coordinates"][1], lng=f["geometry"]["coordinates"][0], label=f["properties"]["label"]).model_dump() for f in data["features"][:5]]
-        except (KeyError, TypeError, IndexError, ValidationError) as exc:
+            if not isinstance(data, list):
+                raise TypeError("Expected a list")
+            results = [Location(lat=float(item["lat"]), lng=float(item["lon"]), label=item["display_name"][:200]).model_dump() for item in data[:5]]
+        except (KeyError, TypeError, ValueError, IndexError, ValidationError) as exc:
             raise ProviderError("Place search returned malformed data") from exc
         self.put(key, results, 3600)
         return results
@@ -110,12 +128,14 @@ class Providers:
             try:
                 tags = e["tags"]
                 pos = e.get("center", e)
+                if not isinstance(tags, dict) or not isinstance(pos, dict):
+                    continue
                 hours = tags.get("opening_hours")
                 capacity = tags.get("capacity")
                 venue = Venue(id=f'{e["type"]}/{e["id"]}', name=tags["name"],
                               location=Location(lat=pos["lat"], lng=pos["lon"], label=tags["name"]),
                               category=tags.get("amenity", "cafe"),
-                              capacity=int(capacity) if capacity and capacity.isdigit() else None,
+                              capacity=int(capacity) if isinstance(capacity, str) and capacity.isdigit() else None,
                               opening_hours=hours, known_open=True if hours == "24/7" else None)
                 venues.append(venue)
             except (KeyError, TypeError, ValueError, ValidationError):

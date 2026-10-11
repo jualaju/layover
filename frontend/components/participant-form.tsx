@@ -42,7 +42,7 @@ export function ParticipantForm({ initial, onSave, busy = false, code, session, 
       <div className="location-summary"><span>{location ? location.label : "No starting point selected"}</span><button className="button secondary small" onClick={locate} type="button">Use my location</button></div>
       {session && <form onSubmit={search} className="search-form"><label className="sr-only" htmlFor="search">Search for a place</label><input id="search" placeholder="Search a neighbourhood or address" value={query} onChange={e => setQuery(e.target.value)} minLength={3} maxLength={160} required /><button className="button secondary" disabled={searching}>{searching ? "Searching…" : "Search"}</button></form>}
       {!!results.length && <ul className="search-results">{results.map((r, i) => <li key={i}><button type="button" onClick={() => { setLocation(r); setResults([]); }}>{r.label}</button></li>)}</ul>}
-      {session && !results.length && query.length >= 3 && !searching && <small className="muted">Search uses OpenRouteService. Choose a result or a map pin.</small>}
+      {session && <small className="muted">Search via Nominatim · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>. Choose a result or a map pin.</small>}
     </div>}
     <form onSubmit={submit} className="participant-form">
       <label>Your name<input name="name" defaultValue={initial?.name} placeholder="e.g. Alex" maxLength={40} required /></label>

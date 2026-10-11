@@ -14,6 +14,7 @@ venv/
 .env.*
 !.env.example
 frontend/.env.local
+backend/data/
 test-results/
 playwright-report/
 .ruff_cache/

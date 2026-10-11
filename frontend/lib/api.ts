@@ -10,10 +10,20 @@ export async function api<T>(path: string, token?: string, method = "GET", data?
   try {
     const response = await fetch(`${apiUrl()}${path}`, {
       method, headers: { ...(data ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: data ? JSON.stringify(data) : undefined, cache: "no-store", signal: controller.signal,
+      body: data ? JSON.stringify(data) : undefined, cache: "no-store", credentials: "include", signal: controller.signal,
     });
     const body = await response.json().catch(() => { throw new Error("The backend returned an unreadable response. Check the server and try again."); });
-    if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Please check your inputs and try again.");
+    if (!response.ok) {
+      if (typeof body.detail === "string") throw new Error(body.detail);
+      if (Array.isArray(body.detail)) {
+        const issue = body.detail.find((item: { loc?: unknown[]; type?: string }) => Array.isArray(item.loc));
+        const field = issue?.loc?.at(-1);
+        if (field === "email") throw new Error("Enter a valid email address.");
+        if (field === "password" && issue?.type === "string_too_short") throw new Error("Use at least 8 characters for your password.");
+      }
+      const issue = Array.isArray(body.detail) ? body.detail[0] : null;
+      throw new Error(issue?.msg ? `${issue.loc?.slice(1).join(" · ") || "Input"}: ${issue.msg}` : "The request failed. Please try again.");
+    }
     return body as T;
   } catch (error) {
     if (error instanceof TypeError) throw new Error("Cannot reach the backend. Check the server and API URL.");
@@ -26,7 +36,7 @@ export function saveSession(code: string, session: Session) {
   window.dispatchEvent(new Event("rendezvous-session"));
 }
 export function loadSession(code: string): Session | null {
-  try { const value = sessionStorage.getItem(`rendezvous:${code}`); return value ? JSON.parse(value) : null; } catch { return null; }
+  try { const value = sessionStorage.getItem(`rendezvous:${code}`); return parseSession(value); } catch { return null; }
 }
 export function localInput(iso: string) {
   const date = new Date(iso);
@@ -34,3 +44,17 @@ export function localInput(iso: string) {
 }
 export function timeLabel(iso: string) { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
 export function dateLabel(iso: string) { return new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
+
+export function parseSession(value: string | null): Session | null {
+  try {
+    const parsed = value ? JSON.parse(value) : null;
+    return parsed && typeof parsed.token === "string" && parsed.token && typeof parsed.participant_id === "string" && parsed.participant_id ? parsed : null;
+  } catch { return null; }
+}
+export function storedSession(code: string) {
+  try { return sessionStorage.getItem(`rendezvous:${code}`); } catch { return null; }
+}
+export function clearSession(code: string) {
+  sessionStorage.removeItem(`rendezvous:${code}`);
+  window.dispatchEvent(new Event("rendezvous-session"));
+}

@@ -2,9 +2,11 @@ import asyncio
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 import secrets
+import sqlite3
 import time
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx
@@ -12,7 +14,8 @@ from pydantic import TypeAdapter, ValidationError
 from starlette.responses import JSONResponse
 
 from .config import Config
-from .models import ClientEvent, CreateRoom, DelayEvent, Participant, ParticipantInput, Settings, UpdateEvent, utcnow
+from .auth_store import AuthStore
+from .models import AuthCredentials, ClientEvent, CreateRoom, DelayEvent, Participant, ParticipantInput, Settings, UpdateEvent, utcnow
 from .optimization import evaluate
 from .providers import ProviderError, Providers
 from .service import invalidate, recalculate, route_room
@@ -36,15 +39,47 @@ def create_app(config: Config | None = None, providers: Providers | None = None)
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        await owned_client.aclose()
+        async def expire_rooms():
+            while True:
+                await asyncio.sleep(30)
+                store.prune()
+        cleanup = asyncio.create_task(expire_rooms())
+        try:
+            yield
+        finally:
+            cleanup.cancel()
+            await asyncio.gather(cleanup, return_exceptions=True)
+            await owned_client.aclose()
 
     app = FastAPI(title='Rendezvous API', lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        # Do not echo submitted values (especially passwords) in validation responses.
+        details = [{key: error[key] for key in ('loc', 'msg', 'type') if key in error} for error in exc.errors()]
+        return JSONResponse({'detail': details}, status_code=422)
+
     app.state.store = store
+    auth_store = AuthStore(config.auth_db_path)
+    app.state.auth_store = auth_store
     app.state.providers = provider
-    app.add_middleware(CORSMiddleware, allow_origins=config.origins, allow_credentials=False,
+    app.add_middleware(CORSMiddleware, allow_origins=config.origins, allow_credentials=True,
                        allow_methods=['GET', 'POST', 'PUT'], allow_headers=['Authorization', 'Content-Type'])
     requests: dict[str, deque] = defaultdict(deque)
+    auth_requests: dict[str, deque] = defaultdict(deque)
+
+    def limit_auth(request: Request):
+        ip = request.client.host if request.client else 'unknown'
+        now = time.monotonic()
+        bucket = auth_requests[ip]
+        while bucket and bucket[0] < now - 60:
+            bucket.popleft()
+        if len(bucket) >= 10:
+            raise HTTPException(429, 'Too many sign-in attempts; retry in a minute')
+        bucket.append(now)
+        for key in list(auth_requests):
+            if auth_requests[key] and auth_requests[key][-1] < now - 60:
+                del auth_requests[key]
 
     @app.middleware('http')
     async def request_limits(request: Request, call_next):
@@ -52,6 +87,15 @@ def create_app(config: Config | None = None, providers: Providers | None = None)
             too_large = int(request.headers.get('content-length', '0')) > 16384
         except ValueError:
             return JSONResponse({'detail': 'Invalid content length'}, status_code=400)
+        if request.method == 'POST' and request.url.path.startswith('/auth/'):
+            origin = request.headers.get('origin')
+            if origin and origin not in config.origins:
+                return JSONResponse({'detail': 'Origin not allowed'}, status_code=403)
+            if request.url.path in {'/auth/login', '/auth/signup'}:
+                try:
+                    limit_auth(request)
+                except HTTPException as exc:
+                    return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
         if too_large:
             return JSONResponse({'detail': 'Request too large'}, status_code=413)
         if request.method != 'OPTIONS' and request.url.path != '/health':
@@ -67,11 +111,57 @@ def create_app(config: Config | None = None, providers: Providers | None = None)
                 for key in list(requests):
                     if requests[key] and requests[key][-1] < now - 60:
                         del requests[key]
+        # Enforce the limit on actual bytes, including chunked requests.
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > 16384:
+                return JSONResponse({'detail': 'Request too large'}, status_code=413)
+            body.extend(chunk)
+        request._body = bytes(body)
         return await call_next(request)
 
     @app.get('/health')
     def health():
         return {'status': 'ok', 'routing_configured': bool(config.ors_key), 'storage': 'in-memory', 'modes': ['walking', 'cycling', 'driving']}
+
+    def set_session_cookie(response: Response, token_value: str):
+        response.set_cookie('rendezvous_session', token_value, max_age=auth_store.session_ttl_seconds,
+                            httponly=True, secure=config.auth_cookie_secure, samesite=config.auth_cookie_samesite, path='/auth')
+
+    @app.post('/auth/signup', status_code=201)
+    def signup(data: AuthCredentials, request: Request, response: Response):
+        if len(data.password) < 8:
+            raise HTTPException(422, 'Password must be at least 8 characters')
+        try:
+            user = auth_store.create_user(data.email, data.password)
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(409, 'Unable to create an account with those details') from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        set_session_cookie(response, auth_store.create_session(user['id']))
+        return {'user': user}
+
+    @app.post('/auth/login')
+    def login(data: AuthCredentials, request: Request, response: Response):
+        user = auth_store.authenticate(data.email, data.password)
+        if not user:
+            raise HTTPException(401, 'Invalid email or password')
+        set_session_cookie(response, auth_store.create_session(user['id']))
+        return {'user': user}
+
+    @app.get('/auth/me')
+    def current_user(request: Request):
+        user = auth_store.get_user_for_session(request.cookies.get('rendezvous_session'))
+        if not user:
+            raise HTTPException(401, 'Sign in to continue')
+        return {'user': user}
+
+    @app.post('/auth/logout')
+    def logout(request: Request, response: Response):
+        auth_store.delete_session(request.cookies.get('rendezvous_session'))
+        response.delete_cookie('rendezvous_session', httponly=True, secure=config.auth_cookie_secure,
+                               samesite=config.auth_cookie_samesite, path='/auth')
+        return {'ok': True}
 
     def add_participant(room, data):
         if len(room.participants) >= config.max_participants:
@@ -105,6 +195,32 @@ def create_app(config: Config | None = None, providers: Providers | None = None)
                     pass
             await room.broadcast('participant.updated')
             return {'room': room.snapshot(), 'participant_id': p.id, 'token': secret}
+
+    @app.post('/rooms/{code}/leave')
+    async def leave(code: str, secret: str = Depends(token)):
+        room = store.get(code)
+        async with room.lock:
+            participant = room.authorize(secret)
+            del room.participants[participant.id]
+            room.tokens = {key: pid for key, pid in room.tokens.items() if pid != participant.id}
+            departing = [socket for socket, pid in room.socket_participants.items() if pid == participant.id]
+            for socket in departing:
+                room.sockets.discard(socket)
+                room.socket_participants.pop(socket, None)
+            if not room.participants:
+                store.rooms.pop(room.code, None)
+            else:
+                if room.host_id == participant.id:
+                    room.host_id = next(iter(room.participants))
+                room.matrix.pop(participant.id, None)
+                recalculate(room)
+                await room.broadcast('participant.updated')
+            for socket in departing:
+                try:
+                    await asyncio.wait_for(socket.close(code=1008, reason='Participant left room'), 2)
+                except Exception:
+                    pass
+            return {'ok': True}
 
     @app.get('/rooms/{code}')
     async def get_room(code: str, secret: str = Depends(token)):
@@ -180,11 +296,12 @@ def create_app(config: Config | None = None, providers: Providers | None = None)
             secret = auth['token']
             room = store.get(code)
             async with room.lock:
-                room.authorize(secret)
+                participant = room.authorize(secret)
                 if len(room.sockets) >= 24:
                     await ws.close(code=1013)
                     return
                 room.sockets.add(ws)
+                room.socket_participants[ws] = participant.id
                 await ws.send_json({'type': 'room.state', 'room': room.snapshot()})
             recent = deque()
             while True:
@@ -245,6 +362,7 @@ def create_app(config: Config | None = None, providers: Providers | None = None)
         finally:
             if room:
                 room.sockets.discard(ws)
+                room.socket_participants.pop(ws, None)
 
     return app
 

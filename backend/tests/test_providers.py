@@ -90,5 +90,32 @@ async def test_discovery_real_tags_unknown_metadata_and_cache():
 
 @pytest.mark.asyncio
 async def test_search_parsing():
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={'features': [{'geometry': {'coordinates': [77, 12]}, 'properties': {'label': 'Bengaluru'}}]}))) as client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=[{'lat': '12', 'lon': '77', 'display_name': 'Bengaluru'}]))) as client:
         assert (await Providers(Config(ors_key='test'), client).search('Bengaluru'))[0]['lat'] == 12
+
+
+@pytest.mark.asyncio
+async def test_search_configured_endpoint_cache_and_long_label():
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=[{'lat': '12', 'lon': '77', 'display_name': 'a' * 250}])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = Providers(Config(nominatim_url='https://search.example/search'), client)
+        result = await provider.search('Bengaluru')
+        assert len(result[0]['label']) == 200
+        assert await provider.search('bengaluru') == result
+        assert len(requests) == 1
+        assert requests[0].url.host == 'search.example'
+
+
+@pytest.mark.asyncio
+async def test_discovery_ignores_malformed_optional_tags():
+    records = [
+        {'type': 'node', 'id': 1, 'lat': 12, 'lon': 77, 'tags': {'name': 'Cafe', 'capacity': 20}},
+        {'type': 'node', 'id': 2, 'tags': []},
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={'elements': records}))) as client:
+        result = await Providers(Config(), client).discover([p.location for p in people()])
+        assert len(result) == 1
+        assert result[0].capacity is None

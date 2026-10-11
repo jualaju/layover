@@ -2,13 +2,17 @@ services:
   backend:
     build: ./backend
     env_file: ./backend/.env
+    environment:
+      AUTH_DB_PATH: /data/rendezvous.sqlite3
+    volumes:
+      - auth_data:/data
     ports: ["8000:8000"]
   frontend:
     build:
       context: ./frontend
       args:
         NEXT_PUBLIC_BACKEND_API_URL: ${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
-        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
     ports: ["3000:3000"]
     depends_on: [backend]
+volumes:
+  auth_data:

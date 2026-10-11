@@ -2,13 +2,13 @@
 
 1. Keep one Next.js App Router frontend and one FastAPI backend. Sites hosting uses a Worker runtime and does not fit this Python/WebSocket backend; prepare conventional hosting rather than replacing the requested stack. The local checkout is the source of truth.
 2. Use OpenRouteService matrix profiles `driving-car`, `cycling-regular`, and `foot-walking`. A matrix has participant rows and venue columns, in minutes internally; provider durations are seconds. Group by mode so each request uses the correct profile. No public transit or live traffic claims.
-3. Use ORS/Pelias for explicit submitted place searches, avoiding an automatic dependency on public Nominatim. Search needs the same backend key as routing. Map clicks and browser geolocation work without it. Discover real cafés/restaurants using bounded Overpass queries, up to ten venues near the group center; this finite candidate search does not guarantee a global optimum.
+3. The current workspace uses Nominatim for explicit submitted place searches, with a configurable endpoint, backend throttling, attribution and caching. Search does not require an ORS key. Map clicks and browser geolocation work without it. Discover real cafés/restaurants using bounded Overpass queries, up to ten venues near the group center; this finite candidate search does not guarantee a global optimum.
 4. Pure minimax ranks by worst journey, then total journey, then venue ID. Optional adjusted score is worst journey + configurable weight × (longest − shortest journey). Show both ranks. Anonymous in-memory users have no trustworthy historical burden data, so historical fairness is deferred.
 5. A simulated delay shifts readiness; it is not added to physical route duration or described as traffic. Rank only routes that meet known constraints and the common target time. Scheduling subtracts route duration and a safety buffer from target time; explicitly mark participants who cannot depart in time.
 6. Unknown price/capacity/opening metadata is reported as unknown, unless the host requests strict verification. Only explicit `24/7` hours are automatically known open; other OSM hours need manual checking until full timezone-aware parsing exists. Never invent prices or open status.
 7. Serialize room changes with per-room asyncio locks. Broadcast full versioned state using typed WebSocket events; full snapshots keep reconnection understandable. Authenticate via the first WebSocket message (avoid tokens in logged URLs), participant bearer tokens on HTTP, explicit allowed origins. Only the host updates settings/discovers/recomputes. Every current participant must approve a proposed venue change.
 8. Hysteresis requires an improvement exceeding both an absolute and relative threshold. Bypass thresholds if the current venue is ineligible, but still require confirmation. Clear stale proposals/votes whenever inputs change. Until approval, keep the current venue and show its feasibility.
-9. In-memory rooms, tokens and cached providers are intentionally process-local. Bounded room/participant counts and TTL help a small demo; no persistent accounts, high availability or multi-worker support.
+9. In-memory rooms, tokens and cached providers are intentionally process-local. Bounded room/participant counts and TTL help a small demo; optional accounts persist in SQLite, but rooms have no high availability or multi-worker support.
 
 ## Provider documentation checked
 
@@ -16,7 +16,7 @@
 - [ORS plans](https://openrouteservice.org/plans/) and [API terms](https://openrouteservice.org/terms-of-service/) — confirm the current account quota in the dashboard before a public demo; attribution is displayed.
 - [Overpass commons](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html) — public resources, timeouts and 429 responses need graceful handling.
 - [OSM tile policy](https://operations.osmfoundation.org/policies/tiles/) — browser caching, attribution, HTTPS, referrer and no bulk download.
-- [Nominatim policy](https://operations.osmfoundation.org/policies/nominatim/) — public API forbids autocomplete, limits the whole application to one request/second, and requires informed developer responsibility. It is not the default here.
+- [Nominatim policy](https://operations.osmfoundation.org/policies/nominatim/) — public API forbids autocomplete, limits the whole application to one request/second, and requires informed developer responsibility. It currently powers submitted search; operators must comply with this policy or configure a suitable replacement.
 
 Live ORS calls have not been verified; credentials are unavailable. These links describe provider constraints, not a promise of service availability.
 

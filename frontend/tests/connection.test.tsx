@@ -62,3 +62,15 @@ it("accepts a new room with a lower version without exposing the previous room",
   await waitFor(() => expect(result.current.room?.code).toBe("FEDCBA12"));
   expect(result.current.room?.version).toBe(0);
 });
+
+it("ignores messages from a socket after switching rooms", async () => {
+  vi.stubGlobal("WebSocket", Socket);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => state(0) }));
+  const { result, rerender } = renderHook(({ code }) => useRoom(code, session), { initialProps: { code: "ABCDEF12" } });
+  await waitFor(() => expect(result.current.room).not.toBeNull());
+  const oldSocket = Socket.all[0];
+  rerender({ code: "FEDCBA12" });
+  act(() => oldSocket.emit({ type: "room.state", room: state(999) }));
+  expect(result.current.room).toBeNull();
+  expect(result.current.status).not.toBe("Live");
+});
